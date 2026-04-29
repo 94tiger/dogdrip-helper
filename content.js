@@ -10,15 +10,13 @@ function parseRelativeTime(text) {
   if (t === '방금 전') return now;
 
   let m;
-  if ((m = t.match(/(\d+)\s*분\s*전/)))  return now - m[1] * 60_000;
+  if ((m = t.match(/(\d+)\s*분\s*전/)))   return now - m[1] * 60_000;
   if ((m = t.match(/(\d+)\s*시간\s*전/))) return now - m[1] * 3_600_000;
-  if ((m = t.match(/(\d+)\s*일\s*전/)))  return now - m[1] * 86_400_000;
+  if ((m = t.match(/(\d+)\s*일\s*전/)))   return now - m[1] * 86_400_000;
 
-  // 절대 날짜: "2024.01.15"
   if ((m = t.match(/(\d{4})\.(\d{1,2})\.(\d{1,2})/))) {
     return new Date(+m[1], +m[2] - 1, +m[3]).getTime();
   }
-  // 절대 날짜: "01.15" (연도 없음)
   if ((m = t.match(/^(\d{1,2})\.(\d{1,2})$/))) {
     const year = new Date().getFullYear();
     const ts = new Date(year, +m[1] - 1, +m[2]).getTime();
@@ -28,8 +26,8 @@ function parseRelativeTime(text) {
   return now;
 }
 
-function getPostTimestamp(link) {
-  const li = link.closest('li');
+function getPostTimestamp(el) {
+  const li = el.closest('li');
   const clockIcon = li?.querySelector('.fa-clock');
   const text = clockIcon?.parentElement?.textContent || '';
   return parseRelativeTime(text);
@@ -37,22 +35,27 @@ function getPostTimestamp(link) {
 
 // ─── DOM 조작 ─────────────────────────────────────────────────────────────────
 
+// 메인 위젯(<a> + 내부 <span>)과 게시물 목록(a.title-link) 모두
+// data-document-srl 속성을 가지므로 [data-document-srl]로 통합 처리
 function applyVisited(ids) {
-  for (const id of ids) {
-    const link = document.querySelector(`a.title-link[data-document-srl="${id}"]:not(.visited)`);
-    if (link) {
+  const idSet = new Set(ids);
+  document.querySelectorAll('[data-document-srl]:not(.visited)').forEach(el => {
+    const id = el.dataset.documentSrl;
+    if (idSet.has(id)) {
       extensionApplied.add(id);
-      link.classList.add('visited');
+      el.classList.add('visited');
     }
-  }
+  });
 }
 
 function collectNativeVisited() {
+  const seen = new Set();
   const entries = [];
-  document.querySelectorAll('a.title-link.visited[data-document-srl]').forEach(link => {
-    const id = link.dataset.documentSrl;
-    if (!extensionApplied.has(id)) {
-      entries.push({ id, ts: getPostTimestamp(link) });
+  document.querySelectorAll('[data-document-srl].visited').forEach(el => {
+    const id = el.dataset.documentSrl;
+    if (!extensionApplied.has(id) && !seen.has(id)) {
+      seen.add(id);
+      entries.push({ id, ts: getPostTimestamp(el) });
     }
   });
   return entries;
@@ -61,31 +64,38 @@ function collectNativeVisited() {
 function startObserver() {
   const observer = new MutationObserver(mutations => {
     const newEntries = [];
+    const seen = new Set();
 
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) {
         if (node.nodeType !== 1) continue;
 
-        const links = [];
-        if (node.matches('a.title-link[data-document-srl]')) links.push(node);
-        node.querySelectorAll('a.title-link[data-document-srl]').forEach(l => links.push(l));
+        const els = [];
+        if (node.matches('[data-document-srl]')) els.push(node);
+        node.querySelectorAll('[data-document-srl]').forEach(e => els.push(e));
 
-        for (const link of links) {
-          const id = link.dataset.documentSrl;
-          if (link.classList.contains('visited')) {
-            if (!extensionApplied.has(id)) newEntries.push({ id, ts: getPostTimestamp(link) });
+        for (const el of els) {
+          const id = el.dataset.documentSrl;
+          if (el.classList.contains('visited')) {
+            if (!extensionApplied.has(id) && !seen.has(id)) {
+              seen.add(id);
+              newEntries.push({ id, ts: getPostTimestamp(el) });
+            }
           } else if (knownIds.has(id)) {
             extensionApplied.add(id);
-            link.classList.add('visited');
+            el.classList.add('visited');
           }
         }
       }
 
       if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
         const el = mutation.target;
-        if (el.matches('a.title-link.visited[data-document-srl]')) {
+        if (el.dataset?.documentSrl && el.classList.contains('visited')) {
           const id = el.dataset.documentSrl;
-          if (!extensionApplied.has(id)) newEntries.push({ id, ts: getPostTimestamp(el) });
+          if (!extensionApplied.has(id) && !seen.has(id)) {
+            seen.add(id);
+            newEntries.push({ id, ts: getPostTimestamp(el) });
+          }
         }
       }
     }
@@ -104,6 +114,22 @@ function startObserver() {
   });
 }
 
+// ─── 클릭 감지 ───────────────────────────────────────────────────────────────
+
+function startClickListener() {
+  document.addEventListener('click', (e) => {
+    const link = e.target.closest('a[data-document-srl]');
+    if (!link) return;
+    const id = link.dataset.documentSrl;
+    if (knownIds.has(id)) return; // 이미 알고 있는 경우 스킵
+    knownIds.add(id);
+    // 클릭 즉시 시각적으로도 반영
+    extensionApplied.add(id);
+    document.querySelectorAll(`[data-document-srl="${id}"]`).forEach(el => el.classList.add('visited'));
+    chrome.runtime.sendMessage({ type: 'ADD_READ_ENTRIES', entries: [{ id, ts: getPostTimestamp(link) }] });
+  }, true); // capture phase: 페이지 이동 전에 확실히 실행
+}
+
 // ─── 초기화 ───────────────────────────────────────────────────────────────────
 
 async function init() {
@@ -118,6 +144,7 @@ async function init() {
     chrome.runtime.sendMessage({ type: 'ADD_READ_ENTRIES', entries: nativeEntries });
   }
 
+  startClickListener();
   startObserver();
 }
 
