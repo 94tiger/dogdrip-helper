@@ -12,7 +12,7 @@ function mergeEntries(a, b) {
   const map = new Map();
   for (const e of [...a, ...b]) {
     const cur = map.get(e.id);
-    if (!cur || cur.ts < e.ts) map.set(e.id, e);
+    if (!cur || cur.ts > e.ts) map.set(e.id, e);
   }
   return [...map.values()];
 }
