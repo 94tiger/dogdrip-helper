@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 240px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      color: #333;
+      background: #fff;
+    }
+    .header {
+      background: #e84a5f;
+      color: #fff;
+      padding: 12px 16px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .body { padding: 16px; }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .row:last-of-type { border-bottom: none; }
+    .label { color: #888; flex-shrink: 0; }
+    .value { font-weight: 500; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge.on  { background: #e6f4ea; color: #1e7e34; }
+    .badge.off { background: #fce8e8; color: #c0392b; }
+    .btn {
+      width: 100%;
+      margin-top: 14px;
+      padding: 8px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    .btn:hover { opacity: .85; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-login  { background: #4285f4; color: #fff; }
+    .btn-logout { background: #f0f0f0; color: #555; }
+  </style>
+</head>
+<body>
+  <div class="header">🐕 개드립 읽음 동기화</div>
+  <div class="body">
+    <div class="row">
+      <span class="label">상태</span>
+      <span id="status" class="badge off">로그인 필요</span>
+    </div>
+    <div class="row" id="row-count" hidden>
+      <span class="label">읽은 게시물</span>
+      <span id="count" class="value">-</span>
+    </div>
+    <div class="row" id="row-sync" hidden>
+      <span class="label">동기화</span>
+      <span id="last-sync" class="value">-</span>
+    </div>
+    <button id="btn-login"  class="btn btn-login">Google로 로그인</button>
+    <button id="btn-logout" class="btn btn-logout" hidden>로그아웃</button>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
