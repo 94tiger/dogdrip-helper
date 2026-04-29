@@ -1,8 +1,5 @@
-// Google Cloud Console에서 발급받은 OAuth 2.0 클라이언트 ID로 교체하세요.
-// 생성 방법: console.cloud.google.com → API 및 서비스 → 사용자 인증 정보
-// → OAuth 클라이언트 ID 만들기 → Chrome 앱 선택
-// Authorized redirect URI에 chrome.identity.getRedirectURL() 반환값 추가 필요
-const CLIENT_ID = 'REPLACE_WITH_YOUR_CLIENT_ID.apps.googleusercontent.com';
+// config.js는 gitignore됩니다. config.example.js를 복사해서 만드세요.
+importScripts('config.js');
 
 const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
 const DRIVE_FILE_NAME = 'dogdrip-read.json';
