@@ -3,6 +3,26 @@ importScripts('config.js');
 
 const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
 const DRIVE_FILE_NAME = 'dogdrip-read.json';
+const RETENTION_DEFAULT_DAYS = 30;
+
+// ─── Entries 유틸 ────────────────────────────────────────────────────────────
+
+// 두 entries 배열을 id 기준 합집합으로 머지 (같은 id면 더 최신 ts 유지)
+function mergeEntries(a, b) {
+  const map = new Map();
+  for (const e of [...a, ...b]) {
+    const cur = map.get(e.id);
+    if (!cur || cur.ts < e.ts) map.set(e.id, e);
+  }
+  return [...map.values()];
+}
+
+// retentionDays가 0이면 무제한, 아니면 ts 기준으로 오래된 항목 제거
+function purgeOldEntries(entries, retentionDays) {
+  if (retentionDays === 0) return entries;
+  const cutoff = Date.now() - retentionDays * 86_400_000;
+  return entries.filter(e => e.ts >= cutoff);
+}
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
 
@@ -44,7 +64,6 @@ async function getToken() {
   const { auth_token, auth_expires_at } = await chrome.storage.local.get(['auth_token', 'auth_expires_at']);
   if (auth_token && auth_expires_at > Date.now()) return auth_token;
 
-  // 먼저 조용히 재인증 시도, 실패하면 팝업 띄우기
   try {
     const { token, expiresAt } = await launchAuth(false);
     await chrome.storage.local.set({ auth_token: token, auth_expires_at: expiresAt });
@@ -61,10 +80,7 @@ async function getToken() {
 async function driveRequest(method, path, token, body = null) {
   const res = await fetch(`https://www.googleapis.com${path}`, {
     method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     ...(body != null && { body: typeof body === 'string' ? body : JSON.stringify(body) }),
   });
   if (!res.ok) throw new Error(`Drive ${method} ${path} → ${res.status}`);
@@ -91,38 +107,32 @@ async function getOrCreateFileId(token) {
       parents: ['appDataFolder'],
     });
     fileId = (await createRes.json()).id;
-    await driveRequest(
-      'PATCH',
-      `/upload/drive/v3/files/${fileId}?uploadType=media`,
-      token,
-      JSON.stringify({ ids: [] })
-    );
+    await driveRequest('PATCH', `/upload/drive/v3/files/${fileId}?uploadType=media`, token,
+      JSON.stringify({ entries: [] }));
   }
 
   await chrome.storage.local.set({ drive_file_id: fileId });
   return fileId;
 }
 
-async function readDriveIds(fileId, token) {
+async function readDriveEntries(fileId, token) {
   const res = await driveRequest('GET', `/drive/v3/files/${fileId}?alt=media`, token);
   const data = await res.json();
-  return data.ids || [];
+  // 구버전 포맷(ids[]) 마이그레이션
+  if (data.ids) return data.ids.map(id => ({ id, ts: Date.now() }));
+  return data.entries || [];
 }
 
-async function writeDriveIds(fileId, token, ids) {
-  await driveRequest(
-    'PATCH',
-    `/upload/drive/v3/files/${fileId}?uploadType=media`,
-    token,
-    JSON.stringify({ ids })
-  );
+async function writeDriveEntries(fileId, token, entries) {
+  await driveRequest('PATCH', `/upload/drive/v3/files/${fileId}?uploadType=media`, token,
+    JSON.stringify({ entries }));
 }
 
 // ─── Sync ────────────────────────────────────────────────────────────────────
 
 async function sync() {
   const { auth_token } = await chrome.storage.local.get('auth_token');
-  if (!auth_token) return; // 로그인 전에는 동기화 스킵
+  if (!auth_token) return;
 
   try {
     const token = await getToken();
@@ -130,24 +140,27 @@ async function sync() {
     try {
       fileId = await getOrCreateFileId(token);
     } catch (e) {
-      // 캐시된 파일 ID가 유효하지 않으면 초기화 후 재시도
       if (e.message.includes('404')) {
         await chrome.storage.local.remove('drive_file_id');
         fileId = await getOrCreateFileId(token);
       } else throw e;
     }
 
-    const { local_ids: localIds = [] } = await chrome.storage.local.get('local_ids');
-    const driveIds = await readDriveIds(fileId, token);
+    const { local_entries: localEntries = [] } = await chrome.storage.local.get('local_entries');
+    const { retention_days: retentionDays = RETENTION_DEFAULT_DAYS } = await chrome.storage.local.get('retention_days');
 
-    const merged = [...new Set([...localIds, ...driveIds])];
-    const hasNewLocal = localIds.some(id => !driveIds.includes(id));
+    const driveEntries = await readDriveEntries(fileId, token);
+    const merged = mergeEntries(localEntries, driveEntries);
+    const purged = purgeOldEntries(merged, retentionDays);
 
-    if (hasNewLocal) {
-      await writeDriveIds(fileId, token, merged);
+    const hasNewLocal = localEntries.some(e => !driveEntries.find(d => d.id === e.id));
+    const hasPurged = purged.length < merged.length;
+
+    if (hasNewLocal || hasPurged) {
+      await writeDriveEntries(fileId, token, purged);
     }
 
-    await chrome.storage.local.set({ local_ids: merged, last_sync: Date.now() });
+    await chrome.storage.local.set({ local_entries: purged, last_sync: Date.now() });
   } catch (err) {
     console.error('[dogdrip-sync] sync 실패:', err.message);
     if (err.message.includes('401')) {
@@ -162,16 +175,15 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create('sync', { periodInMinutes: 1 });
 });
 
-// 서비스 워커 재시작 후에도 알람 유지를 위해 리스너 등록
 chrome.alarms.onAlarm.addListener(({ name }) => {
   if (name === 'sync') sync();
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg.type === 'ADD_READ_IDS') {
-    chrome.storage.local.get('local_ids', ({ local_ids = [] }) => {
-      const merged = [...new Set([...local_ids, ...msg.ids])];
-      chrome.storage.local.set({ local_ids: merged }, () => {
+  if (msg.type === 'ADD_READ_ENTRIES') {
+    chrome.storage.local.get('local_entries', ({ local_entries = [] }) => {
+      const merged = mergeEntries(local_entries, msg.entries);
+      chrome.storage.local.set({ local_entries: merged }, () => {
         sendResponse({ ok: true });
         sync();
       });
@@ -180,8 +192,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === 'GET_IDS') {
-    chrome.storage.local.get('local_ids', ({ local_ids = [] }) => {
-      sendResponse({ ids: local_ids });
+    chrome.storage.local.get('local_entries', ({ local_entries = [] }) => {
+      sendResponse({ ids: local_entries.map(e => e.id) });
     });
     return true;
   }
@@ -203,13 +215,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === 'GET_STATUS') {
-    chrome.storage.local.get(['auth_token', 'last_sync', 'local_ids'], (data) => {
+    chrome.storage.local.get(['auth_token', 'last_sync', 'local_entries', 'retention_days'], (data) => {
       sendResponse({
         loggedIn: !!data.auth_token,
         lastSync: data.last_sync || null,
-        count: (data.local_ids || []).length,
+        count: (data.local_entries || []).length,
+        retentionDays: data.retention_days ?? RETENTION_DEFAULT_DAYS,
       });
     });
+    return true;
+  }
+
+  if (msg.type === 'SET_RETENTION') {
+    chrome.storage.local.set({ retention_days: msg.days }, () => sendResponse({ ok: true }));
     return true;
   }
 });

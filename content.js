@@ -1,8 +1,41 @@
-// 확장 프로그램이 직접 추가한 visited 클래스를 추적 (새 방문과 구분하기 위함)
 const extensionApplied = new Set();
-
-// knownIds: 현재 기기+Drive에서 읽은 것으로 알려진 모든 ID
 let knownIds = new Set();
+
+// ─── 게시글 생성 시각 추출 ────────────────────────────────────────────────────
+
+function parseRelativeTime(text) {
+  const t = text.replace(/\s+/g, ' ').trim();
+  const now = Date.now();
+
+  if (t === '방금 전') return now;
+
+  let m;
+  if ((m = t.match(/(\d+)\s*분\s*전/)))  return now - m[1] * 60_000;
+  if ((m = t.match(/(\d+)\s*시간\s*전/))) return now - m[1] * 3_600_000;
+  if ((m = t.match(/(\d+)\s*일\s*전/)))  return now - m[1] * 86_400_000;
+
+  // 절대 날짜: "2024.01.15"
+  if ((m = t.match(/(\d{4})\.(\d{1,2})\.(\d{1,2})/))) {
+    return new Date(+m[1], +m[2] - 1, +m[3]).getTime();
+  }
+  // 절대 날짜: "01.15" (연도 없음)
+  if ((m = t.match(/^(\d{1,2})\.(\d{1,2})$/))) {
+    const year = new Date().getFullYear();
+    const ts = new Date(year, +m[1] - 1, +m[2]).getTime();
+    return ts > now ? new Date(year - 1, +m[1] - 1, +m[2]).getTime() : ts;
+  }
+
+  return now;
+}
+
+function getPostTimestamp(link) {
+  const li = link.closest('li');
+  const clockIcon = li?.querySelector('.fa-clock');
+  const text = clockIcon?.parentElement?.textContent || '';
+  return parseRelativeTime(text);
+}
+
+// ─── DOM 조작 ─────────────────────────────────────────────────────────────────
 
 function applyVisited(ids) {
   for (const id of ids) {
@@ -15,21 +48,21 @@ function applyVisited(ids) {
 }
 
 function collectNativeVisited() {
-  // 페이지 로드 시 dogdrip이 이미 visited 처리한 것들 (확장 적용분 제외)
-  const ids = [];
+  const entries = [];
   document.querySelectorAll('a.title-link.visited[data-document-srl]').forEach(link => {
-    const srl = link.dataset.documentSrl;
-    if (!extensionApplied.has(srl)) ids.push(srl);
+    const id = link.dataset.documentSrl;
+    if (!extensionApplied.has(id)) {
+      entries.push({ id, ts: getPostTimestamp(link) });
+    }
   });
-  return ids;
+  return entries;
 }
 
 function startObserver() {
   const observer = new MutationObserver(mutations => {
-    const newVisited = [];
+    const newEntries = [];
 
     for (const mutation of mutations) {
-      // 동적 로딩(무한스크롤 등)으로 새 노드가 추가된 경우
       for (const node of mutation.addedNodes) {
         if (node.nodeType !== 1) continue;
 
@@ -38,31 +71,28 @@ function startObserver() {
         node.querySelectorAll('a.title-link[data-document-srl]').forEach(l => links.push(l));
 
         for (const link of links) {
-          const srl = link.dataset.documentSrl;
+          const id = link.dataset.documentSrl;
           if (link.classList.contains('visited')) {
-            // 서버/dogdrip JS가 이미 visited로 준 경우
-            if (!extensionApplied.has(srl)) newVisited.push(srl);
-          } else if (knownIds.has(srl)) {
-            // 새로 로드된 게시물이지만 다른 기기에서 읽은 것
-            extensionApplied.add(srl);
+            if (!extensionApplied.has(id)) newEntries.push({ id, ts: getPostTimestamp(link) });
+          } else if (knownIds.has(id)) {
+            extensionApplied.add(id);
             link.classList.add('visited');
           }
         }
       }
 
-      // 기존 요소의 class 변경 (클릭으로 visited 추가)
       if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
         const el = mutation.target;
         if (el.matches('a.title-link.visited[data-document-srl]')) {
-          const srl = el.dataset.documentSrl;
-          if (!extensionApplied.has(srl)) newVisited.push(srl);
+          const id = el.dataset.documentSrl;
+          if (!extensionApplied.has(id)) newEntries.push({ id, ts: getPostTimestamp(el) });
         }
       }
     }
 
-    if (newVisited.length > 0) {
-      newVisited.forEach(id => knownIds.add(id));
-      chrome.runtime.sendMessage({ type: 'ADD_READ_IDS', ids: newVisited });
+    if (newEntries.length > 0) {
+      newEntries.forEach(e => knownIds.add(e.id));
+      chrome.runtime.sendMessage({ type: 'ADD_READ_ENTRIES', entries: newEntries });
     }
   });
 
@@ -74,30 +104,28 @@ function startObserver() {
   });
 }
 
+// ─── 초기화 ───────────────────────────────────────────────────────────────────
+
 async function init() {
-  // 백그라운드에서 동기화된 ID 가져오기
   const { ids = [] } = await chrome.runtime.sendMessage({ type: 'GET_IDS' });
   knownIds = new Set(ids);
 
-  // 다른 기기에서 읽은 게시물에 visited 적용
   applyVisited(ids);
 
-  // 이 기기에서 이미 읽은 게시물을 백그라운드에 보고
-  const nativeVisited = collectNativeVisited();
-  if (nativeVisited.length > 0) {
-    nativeVisited.forEach(id => knownIds.add(id));
-    chrome.runtime.sendMessage({ type: 'ADD_READ_IDS', ids: nativeVisited });
+  const nativeEntries = collectNativeVisited();
+  if (nativeEntries.length > 0) {
+    nativeEntries.forEach(e => knownIds.add(e.id));
+    chrome.runtime.sendMessage({ type: 'ADD_READ_ENTRIES', entries: nativeEntries });
   }
 
   startObserver();
 }
 
-// Drive 동기화 후 storage가 업데이트되면 자동으로 반영
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes.local_ids?.newValue) {
-    const updated = changes.local_ids.newValue;
-    updated.forEach(id => knownIds.add(id));
-    applyVisited(updated);
+  if (area === 'local' && changes.local_entries?.newValue) {
+    const ids = changes.local_entries.newValue.map(e => e.id);
+    ids.forEach(id => knownIds.add(id));
+    applyVisited(ids);
   }
 });
 

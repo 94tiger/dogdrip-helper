@@ -38,6 +38,14 @@
     }
     .badge.on  { background: #e6f4ea; color: #1e7e34; }
     .badge.off { background: #fce8e8; color: #c0392b; }
+    select {
+      font-size: 12px;
+      padding: 2px 4px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: #fff;
+      cursor: pointer;
+    }
     .btn {
       width: 100%;
       margin-top: 14px;
@@ -69,6 +77,16 @@
     <div class="row" id="row-sync" hidden>
       <span class="label">동기화</span>
       <span id="last-sync" class="value">-</span>
+    </div>
+    <div class="row" id="row-retention" hidden>
+      <span class="label">유지 기간</span>
+      <select id="retention">
+        <option value="7">7일</option>
+        <option value="14">14일</option>
+        <option value="30">30일</option>
+        <option value="90">90일</option>
+        <option value="0">제한없음</option>
+      </select>
     </div>
     <button id="btn-login"  class="btn btn-login">Google로 로그인</button>
     <button id="btn-logout" class="btn btn-logout" hidden>로그아웃</button>

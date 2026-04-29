@@ -1,6 +1,7 @@
 {
   "manifest_version": 3,
   "name": "개드립 읽음 동기화",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA24P+L71ce79/QtsOmQgV/bseBwaq2QgXV3TS4LtTOOZBgx4Sxjlka5i0PldCJLvyR4cBJfb5BqTvlGIwuY6GzgZwSn5Y+6M3HnIo6NX5+2VgoNHXAEDiQ+BbE1jX1wNO6Iy8P/qeGThIaDoj5Rnhn8s49bcwW0XjHy0p/KAvTH7k9hlt7KNn3Ec/0IzFIcLYDjwsAYua62FG8mH9hW85/wv8PMyUVFBPn3s/J4tUG/9QQ2ehhIozHrEMPFWVJbJnjqA/dh3egKR9bTV4xoA96f721iCHDVJu1+QQFHG7kwy6wzDdVkQRgvt6UgklVgUcOYpnCM7yX8Y+QXAnCOEJcQIDAQAB",
   "version": "1.0.0",
   "description": "dogdrip.net 읽은 게시물을 여러 기기에서 Google Drive로 동기화합니다.",
   "permissions": ["storage", "identity", "alarms"],
