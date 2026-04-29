@@ -3,7 +3,7 @@ importScripts('config.js');
 
 const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
 const DRIVE_FILE_NAME = 'dogdrip-read.json';
-const RETENTION_DEFAULT_DAYS = 30;
+const RETENTION_DEFAULT_DAYS = 7;
 
 // ─── Entries 유틸 ────────────────────────────────────────────────────────────
 
