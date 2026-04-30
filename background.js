@@ -131,8 +131,9 @@ async function writeDriveEntries(fileId, token, entries) {
 // ─── Sync ────────────────────────────────────────────────────────────────────
 
 async function sync() {
-  const { auth_token } = await chrome.storage.local.get('auth_token');
+  const { auth_token, sync_enabled } = await chrome.storage.local.get(['auth_token', 'sync_enabled']);
   if (!auth_token) return;
+  if (sync_enabled === false) return;
 
   try {
     const token = await getToken();
@@ -215,19 +216,52 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === 'GET_STATUS') {
-    chrome.storage.local.get(['auth_token', 'last_sync', 'local_entries', 'retention_days'], (data) => {
+    chrome.storage.local.get(['auth_token', 'last_sync', 'local_entries', 'retention_days', 'sync_enabled'], (data) => {
       sendResponse({
         loggedIn: !!data.auth_token,
         lastSync: data.last_sync || null,
         count: (data.local_entries || []).length,
         retentionDays: data.retention_days ?? RETENTION_DEFAULT_DAYS,
+        syncEnabled: data.sync_enabled !== false,
       });
     });
     return true;
   }
 
+  if (msg.type === 'SET_SYNC_ENABLED') {
+    chrome.storage.local.set({ sync_enabled: msg.enabled }, () => sendResponse({ ok: true }));
+    return true;
+  }
+
   if (msg.type === 'SET_RETENTION') {
     chrome.storage.local.set({ retention_days: msg.days }, () => sendResponse({ ok: true }));
+    return true;
+  }
+
+  if (msg.type === 'GET_BLOCKS') {
+    chrome.storage.local.get('blocked_members', ({ blocked_members = [] }) => {
+      sendResponse({ blocks: blocked_members });
+    });
+    return true;
+  }
+
+  if (msg.type === 'ADD_BLOCK') {
+    chrome.storage.local.get('blocked_members', ({ blocked_members = [] }) => {
+      const filtered = blocked_members.filter(b => b.srl !== msg.block.srl);
+      chrome.storage.local.set({ blocked_members: [...filtered, msg.block] }, () => {
+        sendResponse({ ok: true });
+      });
+    });
+    return true;
+  }
+
+  if (msg.type === 'REMOVE_BLOCK') {
+    chrome.storage.local.get('blocked_members', ({ blocked_members = [] }) => {
+      chrome.storage.local.set(
+        { blocked_members: blocked_members.filter(b => b.srl !== msg.srl) },
+        () => sendResponse({ ok: true })
+      );
+    });
     return true;
   }
 });
